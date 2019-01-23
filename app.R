@@ -6,6 +6,8 @@ library(ggplot2)
 library(gridExtra)
 library(seplyr)
 library(shinythemes)
+library(plotly)
+
 options(shiny.maxRequestSize=30*1024^2) 
 # User Interface
 ui <- fluidPage(
@@ -41,14 +43,13 @@ ui <- fluidPage(
                                           Tab = "\t"),
                               selected = "\t"),
                  
-                 # Horizontal line  
-                 tags$hr(),
-                 
                  # Input: Select number of rows to display  
                  radioButtons("disp", "Display",
                               choices = c(All = "all",
                                           Top = "head"),
                               selected = "all"),
+                 # Horizontal line  
+                 tags$hr(),
                  
                  # Select variables to display  
                  uiOutput("checkbox"),
@@ -74,15 +75,26 @@ ui <- fluidPage(
              
              sidebarLayout(
                
-               sidebarPanel(uiOutput("select_ratio_column"),
-                            uiOutput("select_intensity_column"),
+               sidebarPanel(wellPanel(uiOutput("select_ratio_column"),
+                                      uiOutput("select_intensity_column")),
                             sliderInput("MAD", 'Set cut-off %', min = 0, max = 100, value = 95),
-                            selectInput("normalize_by", 'Normalize by:', c('Median','Mean')),
-                            actionButton("outlier_button", "Analyze")
+                            wellPanel(
+                                      selectInput("normalize_by", 'Normalize by:', c('Median','Mean')),
+                                      div(style="display:inline-block",actionButton("normalize_button", "Normalize"),width=6,style="display:center-align")
+                                      ),
+                            wellPanel(
+                                      numericInput("log_scale_y", 'Scale Intensity to log base:', 10),
+                                      numericInput("log_scale_x", 'Scale Ratio to log base:', 2),
+                                      actionButton("log_scale_button", "Scale")
+                                      )
                ),
                
-               mainPanel(verbatimTextOutput("summary_text_before_norm",placeholder = TRUE),
-                         verbatimTextOutput("mOut"),
+               mainPanel(h4("Summary of selected ratio column"),
+                         verbatimTextOutput("summary_text_before_norm",placeholder = TRUE),
+                         h4("Summary of selected ratio column after normalization"),
+                         verbatimTextOutput("summary_text_after_norm", placeholder = TRUE),
+                         h4("Test parameters"),
+                         verbatimTextOutput("mOut", placeholder = TRUE),
                          DT::dataTableOutput("rendered_file_normalized")
                )
                
@@ -97,9 +109,7 @@ ui <- fluidPage(
                            # Sidebar panel for inputs  
                            sidebarPanel(
                              uiOutput("plot_y"),
-                             uiOutput("plot_x"),
-                             textInput("log_scale_y", 'Scale Y to log base:', 10),
-                             textInput("log_scale_x", 'Scale X to log base:', 2)
+                             uiOutput("plot_x")
                            ),
                
                mainPanel(
@@ -120,6 +130,25 @@ ui <- fluidPage(
     ),
     #End of Tab Panel 3: Scatter plot ----
     
+    #Tab Panel 3.1: Scatter plot2 ----
+    tabPanel("Scatter-Plot2", fluid = TRUE,
+             # Sidebar layout with input and output definitions  
+             sidebarLayout(
+               # Sidebar panel for inputs  
+               sidebarPanel(
+                 uiOutput("plot_y1"),
+                 uiOutput("plot_x1")
+               ),
+               
+               mainPanel(
+                 htmltools::div(style = "display:inline-block", plotlyOutput("xy"))
+                 # Show data table
+               )
+             ) #End of sidebarLayout
+    ),
+    #End of Tab Panel 3: Scatter plot ----
+    
+
     #Tab Panel 4: Histogram ----
     tabPanel("Histogram", fluid = TRUE,
              # Sidebar layout with input and output definitions  
@@ -127,7 +156,7 @@ ui <- fluidPage(
                            # Sidebar panel for inputs  
                            sidebarPanel(
                                        uiOutput("plot_x_histogram"),
-                                       textInput('h_bin_size', "Bin size:", value = 50)
+                                       numericInput('h_bin_size', "Bin size:", value = 50)
                            ),
                
                mainPanel(downloadButton("histogram_download", label = "Download Histogram"),
@@ -142,7 +171,11 @@ ui <- fluidPage(
              # Sidebar layout with input and output definitions  
              sidebarLayout(
                # Sidebar panel for inputs  
-               sidebarPanel(),
+                            sidebarPanel(
+                                          uiOutput("select_gene_name"),
+                                          textInput('name_separator', "Name Separator:", value = ';'),
+                                          actionButton("separate", "Generate Gene Names")
+                                        ),
                
                mainPanel()
              )
@@ -156,8 +189,13 @@ ui <- fluidPage(
 # Define server logic to read selected file  
 server <- function(input, output, session) {
   
+  ####Reactive Values####
   # Store data in reactive value
-  reactive_values <- reactiveValues(df_data = NULL)
+  reactive_values <- reactiveValues(df_data = NULL, df_data_to_show = NULL)
+  #Define statistics values
+  stat_values <- reactiveValues(normalize_count = 0)
+  ####End of reactive values####
+  
   
   #Oberve data upload
   observeEvent(input$uploaded_file, 
@@ -168,60 +206,29 @@ server <- function(input, output, session) {
                }
               )
   
-  observeEvent(input$Go,
-               {temp <- values$df_data[-input$Delete, ]
-    values$df_data <- temp
+  #Observe filter button and filter data
+  observeEvent(input$filter_button,
+               {outdf <- NULL
+               for (i in input$column_to_filter) {
+                                                   if ( is.null(outdf) ){
+                                                     outdf <- dplyr::filter(reactive_values$df_data_to_show, UQ(sym(i)) != input$filter_this)
+                                                   }
+                 
+                                                   else{outdf <- dplyr::filter(outdf, UQ(sym(i)) != input$filter_this)
+                                                   }
+               }
+               reactive_values$df_data_to_show <- outdf
                }
               )
   
-  observeEvent(input$soil,
-               {})
   
-  #Selecting the columns from uploaded file
-  df_sel <- reactive({
-    req(input$select_var)
-    df_sel <- df()[,input$select_var]
-    print(length(input$select_var))
-    return(df_sel)
-  })
-  
-  # Filtering based on selected columns to filter from selected columns
-  df_f <- reactive({
-    req(input$column_to_filter)
-    outdf <- NULL
-    for (i in input$column_to_filter) {
-      
-      if ( is.null(outdf) ){
-        outdf <- dplyr::filter(df_sel(), UQ(sym(i)) != input$filter_this)
-      }
-      
-      else{outdf <- dplyr::filter(outdf, UQ(sym(i)) != input$filter_this)
-      }
-      
-    }
-    return (outdf)
-  })
-  
-  # Normalized and outlier found dataframe
-  df_f_o <- reactive({
-    req(input$column_to_filter)
-    outdf <- NULL
-    for (i in input$column_to_filter) {
-      
-      if ( is.null(outdf) ){
-        outdf <- dplyr::filter(df_sel(), UQ(sym(i)) != input$filter_this)
-      }
-      
-      else{outdf <- dplyr::filter(outdf, UQ(sym(i)) != input$filter_this)
-      }
-      
-    }
-    return (cbind(outdf, Significance = stat_values$outliers_bool))
-  })
-  
+  observeEvent(input$select_var,
+               {reactive_values$df_data_to_show <- reactive_values$df_data[,input$select_var]})
+
   # Print data table  
-  output$rendered_file <- DT::renderDataTable(reactive_values$df_data)
-  
+  output$rendered_file <- DT::renderDataTable(reactive_values$df_data_to_show, filter = 'top', options = list(
+    pageLength = 5, autoWidth = TRUE
+  ))
   
   #Download widget
   output$download_data <- downloadHandler(
@@ -229,103 +236,160 @@ server <- function(input, output, session) {
       paste0("mydata")
     },
     content = function(file) { 
-      write.csv(df_sel(), file, row.names = FALSE) 
+      write.csv(reactive_values$df_data_to_show, file, row.names = FALSE) 
     }
   )
   
   # Dynamically generate cols to be selected input when data is uploaded  
   output$checkbox <- renderUI({
-    selectInput(inputId = "select_var", 
-                label = "Select variables", 
-                choices = names(reactive_values$df_data),
-                multiple = TRUE)
+                              selectInput(inputId = "select_var", 
+                                          label = "Select variables", 
+                                          choices = names(reactive_values$df_data),
+                                          multiple = TRUE)
   })
   
   #define cols to be filtered
   output$filter_columns <- renderUI({
-    tagList(
-      selectInput(inputId = "column_to_filter", 
-                  label = "Select columns to filter", 
-                  choices = input$select_var,
-                  multiple = TRUE),
-      textInput("filter_this", "Remove rows containing:", "+")
-    )
-  })
+                                    tagList(
+                                      selectInput(inputId = "column_to_filter", 
+                                                  label = "Select columns to filter", 
+                                                  choices = input$select_var,
+                                                  multiple = TRUE),
+                                      textInput("filter_this", "Remove rows containing:", "+"),
+                                      actionButton(inputId = "filter_button",
+                                                   label = "Filter")
+                                            )
+                                    }
+                                    )
   
   #Define ratio column
   output$select_ratio_column <- renderUI({
-    selectInput(inputId = "selected_ratio_column", 
-                label = "Select ratio column", 
-                choices = input$select_var,
-                multiple = FALSE)
-  })
+                                          req(input$select_var)
+                                          selectInput(inputId = "selected_ratio_column", 
+                                                      label = "Select ratio column", 
+                                                      choices = input$select_var,
+                                                      multiple = FALSE)
+                                          }
+                                         )
   
   #Define intensity column
   output$select_intensity_column <- renderUI({
-    selectInput(inputId = "selected_intensity_column", 
-                label = "Select intensity column", 
-                choices = input$select_var,
-                multiple = FALSE)
-  })
+                                              req(input$select_var)
+                                              selectInput(inputId = "selected_intensity_column", 
+                                                          label = "Select intensity column", 
+                                                          choices = input$select_var,
+                                                          multiple = FALSE)
+                                              }
+                                             )
   
   ####Calculate normalized values####
   #Generate summary for ratio column, normalize and MAD
   output$summary_text_before_norm <- renderText({
-    c(summary(df_sel() %>% select(input$selected_ratio_column)))
-  })
+                                                  req(input$selected_ratio_column)
+                                                  summary(data.frame(stat_values$selected_ratios))
+                                                 }
+                                                )
   
-  #Define statistics values
-  stat_values <- reactiveValues()
+  #Generate summary for after normalization
+  output$summary_text_after_norm <- renderText({
+                                                req(input$normalize_button)
+                                                summary(data.frame(stat_values$normalized_ratio))
+                                                }
+                                               )
+  
+
+  
+  #Observe MAD quantile selection
+  observeEvent(input$MAD,
+               {stat_values$mad_cutoff <- qnorm(input$MAD*0.01)
+               }
+              )
   
   #Observe changes and re-eavluate statistics
-  observe({
-    req(input$selected_ratio_column)
-    stat_values$selected_ratios <- as.numeric(unlist(df_sel() %>% select(input$selected_ratio_column)))
-    stat_values$m <- median(stat_values$selected_ratios)
-    stat_values$mad_cutoff <- qnorm(input$MAD*0.01)
-    stat_values$mad <- mad(stat_values$selected_ratios)
-    #stat_values$outliers_bool <- which(((stat_values$selected_ratios - stat_values$m) / stat_values$mad) > stat_values$mad_cutoff)
-    stat_values$outliers_bool <- ifelse( ( ( abs(stat_values$selected_ratios - stat_values$m) / stat_values$mad ) > stat_values$mad_cutoff), "Outlier", "NS")
-    print(stat_values$outliers_bool)
-    #df_sel() <- cbind(df_sel(), stat_values$outliers_bool)
-  })
+  observeEvent(input$selected_ratio_column,
+               {stat_values$selected_ratios <- as.numeric(unlist(reactive_values$df_data_to_show %>% select(input$selected_ratio_column)))
+                stat_values$m <- median(stat_values$selected_ratios)
+               }
+              )
+  
+  #Add intensity column to reactive values
+  observeEvent(input$selected_intensity_column,
+               {stat_values$selected_intensity <- as.numeric(unlist(reactive_values$df_data_to_show %>% select(input$selected_intensity_column)))
+               stat_values$m_intensity <- median(stat_values$selected_intensity)
+               }
+  )
+  
+  #Normalize data
+  observeEvent(input$normalize_button,
+               {
+               stat_values$m <- median(stat_values$selected_ratios)
+               stat_values$normalized_ratio <- stat_values$selected_ratios / stat_values$m
+               stat_values$normalized_ratio_median <- median(stat_values$normalized_ratio)
+               stat_values$mad <- mad(stat_values$normalized_ratio)
+               stat_values$outliers_bool <- ifelse( ( ( abs(stat_values$normalized_ratio - stat_values$normalized_ratio_median) / stat_values$mad ) > stat_values$mad_cutoff), "Outlier", "NS")
+               #print(stat_values$outliers_bool)
+               
+               if (stat_values$normalize_count == 0)
+               {
+                stat_values$normalize_count <- 1 + stat_values$normalize_count
+                reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,"Normalized_Ratio" = stat_values$normalized_ratio, "Outlier" = stat_values$outliers_bool)
+               }
+               else
+                 {
+                  reactive_values$df_data_to_show[ncol(reactive_values$df_data_to_show)] <- stat_values$outliers_bool
+                  reactive_values$df_data_to_show[ncol(reactive_values$df_data_to_show)-1] <- stat_values$normalized_ratio
+                 }
+               stat_values$normalize_count <- 1 + stat_values$normalize_count
+               })
+  #Log Scale
+  observeEvent(input$log_scale_button,
+               {
+               print(log(input$log_scale_x))
+               stat_values$normalized_ratio_log <- log(stat_values$normalized_ratio, base= input$log_scale_x)
+               stat_values$intensity_log <- log(stat_values$selected_intensity, base= input$log_scale_y)
+               reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,"log_Normalized_Ratio" = log(stat_values$normalized_ratio, base= input$log_scale_x), "log_Intensity" = log(stat_values$selected_intensity, base= input$log_scale_y))
+               }
+              )
   
   #Output statistics
   output$mOut <- renderText({
     req(input$selected_ratio_column)
     paste("The median for your selection is: ", stat_values$m,
-          "\nThe MAD for your selection is: ", stat_values$mad,
+          "\nThe median for your selection after normalization is: ", stat_values$normalized_ratio_median,
+          "\nThe MAD for your selection after normalization is: ", stat_values$mad,
           "\nCut off MAD for the quantile is: ", stat_values$mad_cutoff)
-  })
+                             }
+                            )
   
   #Plot options
   output$plot_y <- renderUI({
     selectInput(inputId = "plot_y_on", 
                 label = "Y-axis:", 
-                choices = input$select_var,
+                choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
-  })
+                             }
+                            )
   
   output$plot_x <- renderUI({
     selectInput(inputId = "plot_x_on", 
                 label = "X-axis:", 
-                choices = input$select_var,
+                choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
-  })
+                             }
+                            )
   
   
   #plot scatter zoomable#
-  ranges <- reactiveValues(x = NULL, y = NULL)
+  ranges <- reactiveValues(x = NULL, y = NULL, regular_color = 'darkgray', outlier_color = 'darkred' )
   
   scatter_plot_f <- function(){
-    ggplot(data = df_sel(), 
+    ggplot(data = reactive_values$df_data_to_show, 
            aes_string(x = input$plot_x_on,
-                      y = input$plot_y_on),
-           color=factor(season)
+                      y = input$plot_y_on)
     ) +
-      geom_point(colour = "darkgreen", alpha = 0.9) +
+      geom_point(colour = ifelse(reactive_values$df_data_to_show$Outlier=='Outlier', ranges$outlier_color, ranges$regular_color), alpha = 0.9) +
       coord_cartesian(xlim = ranges$x, ylim = ranges$y,
-                      expand = FALSE) +
+                      expand = TRUE) +
       theme_bw()
   }
   
@@ -363,8 +427,31 @@ server <- function(input, output, session) {
   })
   #brushed data
   output$brushed_points <- DT::renderDataTable({
-    brushedPoints(df(), input$scatterplot_brush, xvar = input$plot_x_on, yvar = input$plot_y_on) 
+    brushedPoints(reactive_values$df_data_to_show, input$scatterplot_brush, xvar = input$plot_x_on, yvar = input$plot_y_on) 
   })
+  
+  ####Scatterplot 2####
+  m <- list(color = toRGB("black"))
+  m2 <- list(color = toRGB("black", 0.2))
+  
+  #output$xy <- renderPlotly({
+  #  reactive_values$df_data_to_show %>% 
+  #    plot_ly(x = ~input$plot_x_on, y = ~input$plot_y_on)
+  #})
+  
+  output$xy <- renderPlotly({
+    # use the key aesthetic/argument to help uniquely identify selected observations
+    key <- row.names(reactive_values$df_data_to_show)
+
+      plot_ly(reactive_values$df_data_to_show, x = ~input$plot_x, y = ~input$plot_y, key = ~key, type = "scatter") %>%
+        layout(dragmode = "select")
+  })
+  
+  output$brush <- renderPrint({
+    d <- event_data("plotly_selected")
+    if (is.null(d)) "Click and drag events (i.e., select/lasso) appear here (double-click to clear)" else d
+  })
+  
   
   ####Histogram####
   ####Histogram plot####
@@ -373,14 +460,14 @@ server <- function(input, output, session) {
   output$plot_x_histogram <- renderUI({
     selectInput(inputId = "plot_x_on_histogram", 
                 label = "X-axis:", 
-                choices = input$select_var,
+                choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
   })
   
   #generate histogram
   
   histogram_f <- function(){
-    ggplot(data = df(), aes_string(x = input$plot_x_on_histogram)) +
+    ggplot(data = reactive_values$df_data_to_show, aes_string(x = input$plot_x_on_histogram)) +
       geom_histogram(color="black", fill="white", bins = input$h_bin_size) +
       theme_bw()
   }
@@ -406,7 +493,29 @@ server <- function(input, output, session) {
     
     makePdf(theFile)
   })
-  #       #
+  #Gene annotation#
+  #Generate gene names
+  output$select_gene_name <- renderUI({
+    selectInput(inputId = "select_gene_name_col", 
+                label = "Gene name column:", 
+                choices = names(reactive_values$df_data_to_show),
+                multiple = FALSE)
+  })
+  
+  observeEvent(input$separate,
+               {
+               gene_names <- reactive_values$df_data_to_show %>% select(input$select_gene_name_col)
+               #reactive_values$df_data_to_show %>% tidyr::separate(select_gene_name_col, 
+                #                      c("Gene name"), extra='drop')
+               #reactive_values$df_data_to_show <- outdf
+               print(typeof(gene_names))
+               for (i in 1:nrow(gene_names)){
+                 print(strsplit(gene_names[i,][[1]], ';'))
+                 #print(i)
+               }
+               #reactive_values$df_data_to_show %>% separate(input$select_gene_name_col, c("a", "b"), extra = "drop", fill = "right")
+               }
+  )
   
   
   
