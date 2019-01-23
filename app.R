@@ -516,10 +516,7 @@ server <- function(input, output, session) {
                #reactive_values$df_data_to_show %>% separate(input$select_gene_name_col, c("a", "b"), extra = "drop", fill = "right")
                }
   )
-  
-  
-  
-  
+  a<-1
 }
 
 # Create Shiny app  
