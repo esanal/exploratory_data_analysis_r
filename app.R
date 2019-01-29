@@ -7,6 +7,7 @@ library(gridExtra)
 library(seplyr)
 library(shinythemes)
 library(plotly)
+library(mygene)
 
 options(shiny.maxRequestSize=30*1024^2) 
 # User Interface
@@ -504,19 +505,28 @@ server <- function(input, output, session) {
   
   observeEvent(input$separate,
                {
-               gene_names <- reactive_values$df_data_to_show %>% select(input$select_gene_name_col)
+               gene_names <- reactive_values$df_data_to_show %>% dplyr::select(input$select_gene_name_col)
                #reactive_values$df_data_to_show %>% tidyr::separate(select_gene_name_col, 
                 #                      c("Gene name"), extra='drop')
                #reactive_values$df_data_to_show <- outdf
-               print(typeof(gene_names))
-               for (i in 1:nrow(gene_names)){
-                 print(strsplit(gene_names[i,][[1]], ';'))
-                 #print(i)
+               gnl <- c()
+               gene_names <- unlist(gene_names, use.names = FALSE)
+               for (i in 1:length(gene_names)){
+                 a <- unlist(strsplit(gene_names[i], ';'), use.names = FALSE)
+                 #print(a)
+                 if (!identical(a, character(0))){
+                 for (k in 1:length(a)){
+                   
+                   if (a[k] == toupper(a[k])){print(a[k])
+                     gnl <- c(gnl,a[k])}
+                   }
+                 }
+                 else{gnl <- c(gnl,"")}
                }
                #reactive_values$df_data_to_show %>% separate(input$select_gene_name_col, c("a", "b"), extra = "drop", fill = "right")
+               print(gnl)
                }
   )
-  a<-1
 }
 
 # Create Shiny app  
