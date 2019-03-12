@@ -308,14 +308,14 @@ server <- function(input, output, session) {
   
   #Observe changes and re-eavluate statistics
   observeEvent(input$selected_ratio_column,
-               {stat_values$selected_ratios <- as.numeric(unlist(reactive_values$df_data_to_show %>% select(input$selected_ratio_column)))
+               {stat_values$selected_ratios <- as.numeric(unlist(reactive_values$df_data_to_show %>% dplyr::select(input$selected_ratio_column)))
                 stat_values$m <- median(stat_values$selected_ratios)
                }
               )
   
   #Add intensity column to reactive values
   observeEvent(input$selected_intensity_column,
-               {stat_values$selected_intensity <- as.numeric(unlist(reactive_values$df_data_to_show %>% select(input$selected_intensity_column)))
+               {stat_values$selected_intensity <- as.numeric(unlist(reactive_values$df_data_to_show %>% dplyr::select(input$selected_intensity_column)))
                stat_values$m_intensity <- median(stat_values$selected_intensity)
                }
   )
@@ -506,25 +506,31 @@ server <- function(input, output, session) {
   observeEvent(input$separate,
                {
                gene_names <- reactive_values$df_data_to_show %>% dplyr::select(input$select_gene_name_col)
+               print(typeof(gene_names))
                #reactive_values$df_data_to_show %>% tidyr::separate(select_gene_name_col, 
                 #                      c("Gene name"), extra='drop')
                #reactive_values$df_data_to_show <- outdf
-               gnl <- c()
                gene_names <- unlist(gene_names, use.names = FALSE)
-               for (i in 1:length(gene_names)){
-                 a <- unlist(strsplit(gene_names[i], ';'), use.names = FALSE)
-                 #print(a)
-                 if (!identical(a, character(0))){
-                 for (k in 1:length(a)){
-                   
-                   if (a[k] == toupper(a[k])){print(a[k])
-                     gnl <- c(gnl,a[k])}
+               gnl_l <- length(gene_names)
+               gnl <- character(gnl_l)
+               k <- 0
+               #print(gene_names)
+               for (i in gene_names){
+                 k <- k + 1
+                 print(i)
+                 a <- strsplit(i, ';')
+                 a<-unlist(a, use.names=FALSE)
+                 print(a[1])
+                 gnl[k] <- ""
+                 for (l in a) {
+                   if (l == toupper(l)){
+                     gnl[k] <- l
+                     next
+                     next
                    }
-                 }
-                 else{gnl <- c(gnl,"")}
+                  }
                }
-               #reactive_values$df_data_to_show %>% separate(input$select_gene_name_col, c("a", "b"), extra = "drop", fill = "right")
-               print(gnl)
+               reactive_values$df_data_to_show$Gene_Names_edited <- gnl
                }
   )
 }
