@@ -175,14 +175,15 @@ ui <- fluidPage(
                             sidebarPanel(
                                           uiOutput("select_gene_name"),
                                           textInput('name_separator', "Name Separator:", value = ';'),
-                                          actionButton("separate", "Generate Gene Names")
+                                          textInput('new_gene_name_column', "New 'Gene Name' column:", value = 'GeneNameEdited'),
+                                          actionButton("separate", "Generate Gene Names"),
+                                          actionButton("add_annotation", "Add annotation")
                                         ),
                
-               mainPanel()
+               mainPanel(DT::dataTableOutput("GO_results_table"))
              )
     ) 
     #End of Tab Panel 5: Annotation ----
-    
   )
 )
 # End of User Interface
@@ -192,7 +193,7 @@ server <- function(input, output, session) {
   
   ####Reactive Values####
   # Store data in reactive value
-  reactive_values <- reactiveValues(df_data = NULL, df_data_to_show = NULL)
+  reactive_values <- reactiveValues(df_data = NULL, df_data_to_show = NULL, GO_results = NULL)
   #Define statistics values
   stat_values <- reactiveValues(normalize_count = 0)
   ####End of reactive values####
@@ -260,8 +261,7 @@ server <- function(input, output, session) {
                                       actionButton(inputId = "filter_button",
                                                    label = "Filter")
                                             )
-                                    }
-                                    )
+                                    })
   
   #Define ratio column
   output$select_ratio_column <- renderUI({
@@ -270,8 +270,7 @@ server <- function(input, output, session) {
                                                       label = "Select ratio column", 
                                                       choices = input$select_var,
                                                       multiple = FALSE)
-                                          }
-                                         )
+                                          })
   
   #Define intensity column
   output$select_intensity_column <- renderUI({
@@ -280,45 +279,42 @@ server <- function(input, output, session) {
                                                           label = "Select intensity column", 
                                                           choices = input$select_var,
                                                           multiple = FALSE)
-                                              }
-                                             )
+                                              })
   
   ####Calculate normalized values####
   #Generate summary for ratio column, normalize and MAD
   output$summary_text_before_norm <- renderText({
                                                   req(input$selected_ratio_column)
                                                   summary(data.frame(stat_values$selected_ratios))
-                                                 }
-                                                )
+                                                 })
   
   #Generate summary for after normalization
   output$summary_text_after_norm <- renderText({
                                                 req(input$normalize_button)
                                                 summary(data.frame(stat_values$normalized_ratio))
-                                                }
-                                               )
+                                                })
   
 
   
   #Observe MAD quantile selection
-  observeEvent(input$MAD,
+  observeEvent(input$MAD, 
                {stat_values$mad_cutoff <- qnorm(input$MAD*0.01)
                }
-              )
+               )
   
   #Observe changes and re-eavluate statistics
   observeEvent(input$selected_ratio_column,
                {stat_values$selected_ratios <- as.numeric(unlist(reactive_values$df_data_to_show %>% dplyr::select(input$selected_ratio_column)))
                 stat_values$m <- median(stat_values$selected_ratios)
                }
-              )
+               )
   
   #Add intensity column to reactive values
   observeEvent(input$selected_intensity_column,
                {stat_values$selected_intensity <- as.numeric(unlist(reactive_values$df_data_to_show %>% dplyr::select(input$selected_intensity_column)))
                stat_values$m_intensity <- median(stat_values$selected_intensity)
                }
-  )
+               )
   
   #Normalize data
   observeEvent(input$normalize_button,
@@ -341,7 +337,8 @@ server <- function(input, output, session) {
                   reactive_values$df_data_to_show[ncol(reactive_values$df_data_to_show)-1] <- stat_values$normalized_ratio
                  }
                stat_values$normalize_count <- 1 + stat_values$normalize_count
-               })
+               }
+               )
   #Log Scale
   observeEvent(input$log_scale_button,
                {
@@ -350,7 +347,7 @@ server <- function(input, output, session) {
                stat_values$intensity_log <- log(stat_values$selected_intensity, base= input$log_scale_y)
                reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,"log_Normalized_Ratio" = log(stat_values$normalized_ratio, base= input$log_scale_x), "log_Intensity" = log(stat_values$selected_intensity, base= input$log_scale_y))
                }
-              )
+               )
   
   #Output statistics
   output$mOut <- renderText({
@@ -359,8 +356,7 @@ server <- function(input, output, session) {
           "\nThe median for your selection after normalization is: ", stat_values$normalized_ratio_median,
           "\nThe MAD for your selection after normalization is: ", stat_values$mad,
           "\nCut off MAD for the quantile is: ", stat_values$mad_cutoff)
-                             }
-                            )
+                             })
   
   #Plot options
   output$plot_y <- renderUI({
@@ -368,16 +364,14 @@ server <- function(input, output, session) {
                 label = "Y-axis:", 
                 choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
-                             }
-                            )
+                             })
   
   output$plot_x <- renderUI({
     selectInput(inputId = "plot_x_on", 
                 label = "X-axis:", 
                 choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
-                             }
-                            )
+                             })
   
   
   #plot scatter zoomable#
@@ -398,7 +392,8 @@ server <- function(input, output, session) {
     scatter_plot_f()
   })
   
-  observeEvent(input$scatterplot_dblclick, {
+  observeEvent(input$scatterplot_dblclick, 
+               {
     brush <- input$scatterplot_brush
     if (!is.null(brush)) {
       ranges$x <- c(brush$xmin, brush$xmax)
@@ -410,7 +405,8 @@ server <- function(input, output, session) {
       ranges$x <- NULL
       ranges$y <- NULL
     }
-  })
+  }
+               )
   
   ####Download plot as pdf####
   ### function to do the pdf export
@@ -480,7 +476,6 @@ server <- function(input, output, session) {
   ####Download plot as pdf####
   ### function to do the pdf export
   output$histogram_download <- downloadHandler("test.pdf", function(theFile) {
-    
     makePdf <- function(filename){
       # I use Cairo instead of the the basic pdf function. It is much more complex and it supports special characters like "u"  
       Cairo(type = 'pdf', file = filename, width = 16, height = 16, units='cm', bg='transparent')
@@ -491,9 +486,8 @@ server <- function(input, output, session) {
       
       dev.off()
     }
-    
-    makePdf(theFile)
-  })
+    makePdf(theFile)}
+                                                )
   #Gene annotation#
   #Generate gene names
   output$select_gene_name <- renderUI({
@@ -502,7 +496,7 @@ server <- function(input, output, session) {
                 choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
   })
-  
+  #Gene name button observer
   observeEvent(input$separate,
                {
                gene_names <- reactive_values$df_data_to_show %>% dplyr::select(input$select_gene_name_col)
@@ -517,10 +511,10 @@ server <- function(input, output, session) {
                #print(gene_names)
                for (i in gene_names){
                  k <- k + 1
-                 print(i)
+                 #print(i)
                  a <- strsplit(i, ';')
                  a<-unlist(a, use.names=FALSE)
-                 print(a[1])
+                 #print(a[1])
                  gnl[k] <- ""
                  for (l in a) {
                    if (l == toupper(l)){
@@ -530,9 +524,27 @@ server <- function(input, output, session) {
                    }
                   }
                }
-               reactive_values$df_data_to_show$Gene_Names_edited <- gnl
+               reactive_values$df_data_to_show$GeneNames <- gnl
                }
   )
+  #Gene name button observer
+  observeEvent(input$add_annotation,
+               {
+                 gnl<-reactive_values$df_data_to_show$GeneNames
+                 res <- queryMany(gnl, scopes='symbol', fields=c('go'), species='human', returnall=FALSE)
+                 #reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,res)
+                 reactive_values$GO_results <- as.data.frame(res)
+                 reactive_values$GO_results_CC <- as.data.frame(res[1, 'go.CC'][[1]])
+                 reactive_values$GO_results_BP <- as.data.frame(res[1, 'go.BP'][[1]])
+                 reactive_values$GO_results_MF <- res[1, 'go.MF'][[1]]
+                 # Print GO table  
+                 output$GO_results_table <- DT::renderDataTable(reactive_values$GO_results_BP, filter = 'top', options = list(
+                   pageLength = 5, autoWidth = TRUE
+                 ))
+               }
+  )
+  
+  
 }
 
 # Create Shiny app  
