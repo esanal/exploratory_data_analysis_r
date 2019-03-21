@@ -531,16 +531,63 @@ server <- function(input, output, session) {
   observeEvent(input$add_annotation,
                {
                  gnl<-reactive_values$df_data_to_show$GeneNames
-                 res <- queryMany(gnl, scopes='symbol', fields=c('go'), species='human', returnall=FALSE)
-                 #reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,res)
-                 reactive_values$GO_results <- as.data.frame(res)
-                 reactive_values$GO_results_CC <- as.data.frame(res[1, 'go.CC'][[1]])
-                 reactive_values$GO_results_BP <- as.data.frame(res[1, 'go.BP'][[1]])
-                 reactive_values$GO_results_MF <- res[1, 'go.MF'][[1]]
+                 res <- queryMany(gnl, scopes='symbol', fields=c('go'), species='human', returnall=TRUE, return.as = "records")
+                 annotations <- vector(mode="list", length=length(res$response))
+                 for (i in 1:length(res$response)){
+                   gene_name <- res$response[[i]]$query
+                   bp_cur <- c()
+                   mf_cur <- c()
+                   cc_cur <- c()
+                   if (is.list(res$response[[i]]$go$BP[[1]])){
+                    for (j in 1:length(res$response[[i]]$go$BP)){
+                      bp_cur <- c(bp_cur,res$response[[i]][["go"]][["BP"]][[j]][["term"]])
+                   }
+                   }
+                   
+                   if (is.list(res$response[[i]]$go$MF[[1]])){
+                   for (k in 1:length(res$response[[i]]$go$MF)){
+                     mf_cur <- c(mf_cur,res$response[[i]][["go"]][["MF"]][[k]][["term"]])
+                   }
+                   }
+                   if (is.list(res$response[[i]]$go$CC[[1]])){
+                   for (l in 1:length(res$response[[i]]$go$CC)){
+                     cc_cur <- c(cc_cur,res$response[[i]][["go"]][["CC"]][[l]][["term"]])
+                   }
+                   }
+                   annotations[[i]] <- list(cc_cur, bp_cur, mf_cur)
+                   names(annotations[[i]]) <- c('GO_Cellular_Compartment',
+                                                'GO_Biological_Process',
+                                                'GO_Molecular_Function'
+                                                )
+                   names(annotations)[i] <- gene_name
+                 }
                  # Print GO table  
-                 output$GO_results_table <- DT::renderDataTable(reactive_values$GO_results_BP, filter = 'top', options = list(
-                   pageLength = 5, autoWidth = TRUE
-                 ))
+                 #output$GO_results_table <- DT::renderDataTable(reactive_values$GO_results_BP, filter = 'top',
+                  #                                              options = list(pageLength = 5, autoWidth = TRUE))
+                 gnl_l <- length(gnl)
+                 cc_add <- c()
+                 mf_add <- c()
+                 bp_add <- c()
+                 for (m in 1:gnl_l){
+                   if (gnl[m] %in% names(annotations)){
+                     mf <- paste0(annotations[[gnl[m]]]$GO_Molecular_Function, collapse = ', ')
+                     bp <- paste0(annotations[[gnl[m]]]$GO_Biological_Process, collapse = ', ')
+                     cc <- paste0(annotations[[gnl[m]]]$GO_Cellular_Compartment, collapse = ', ')
+                   }
+            
+                   else {
+                     mf <- ""
+                     bp <- ""
+                     cc <- ""
+                   }
+                   cc_add <- c(cc_add,cc)
+                   bp_add <- c(bp_add,bp)
+                   mf_add <- c(mf_add,mf)
+                   
+                 }
+                 reactive_values$df_data_to_show$GO_MF <- mf_add
+                 reactive_values$df_data_to_show$GO_BP <- bp_add
+                 reactive_values$df_data_to_show$GO_CC <- cc_add
                }
   )
   
