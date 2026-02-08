@@ -201,10 +201,15 @@ server <- function(input, output, session) {
   
   #Oberve data upload
   observeEvent(input$uploaded_file, 
-               {reactive_values$df_data <-  read.table(input$uploaded_file$datapath,
-                                                       header = input$header,
-                                                       sep = input$sep,
-                                                       stringsAsFactors=F)
+               {req(input$uploaded_file)
+                uploaded_paths <- input$uploaded_file$datapath
+                uploaded_data <- lapply(uploaded_paths, function(path) {
+                  read.table(path,
+                             header = input$header,
+                             sep = input$sep,
+                             stringsAsFactors = FALSE)
+                })
+                reactive_values$df_data <- dplyr::bind_rows(uploaded_data)
                }
               )
   
@@ -318,34 +323,34 @@ server <- function(input, output, session) {
   
   #Normalize data
   observeEvent(input$normalize_button,
-               {
-               stat_values$m <- median(stat_values$selected_ratios)
-               stat_values$normalized_ratio <- stat_values$selected_ratios / stat_values$m
-               stat_values$normalized_ratio_median <- median(stat_values$normalized_ratio)
-               stat_values$mad <- mad(stat_values$normalized_ratio)
-               stat_values$outliers_bool <- ifelse( ( ( abs(stat_values$normalized_ratio - stat_values$normalized_ratio_median) / stat_values$mad ) > stat_values$mad_cutoff), "Outlier", "NS")
-               #print(stat_values$outliers_bool)
-               
-               if (stat_values$normalize_count == 0)
-               {
-                stat_values$normalize_count <- 1 + stat_values$normalize_count
-                reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,"Normalized_Ratio" = stat_values$normalized_ratio, "Outlier" = stat_values$outliers_bool)
-               }
-               else
-                 {
-                  reactive_values$df_data_to_show[ncol(reactive_values$df_data_to_show)] <- stat_values$outliers_bool
-                  reactive_values$df_data_to_show[ncol(reactive_values$df_data_to_show)-1] <- stat_values$normalized_ratio
-                 }
-               stat_values$normalize_count <- 1 + stat_values$normalize_count
+               {req(stat_values$selected_ratios)
+                normalization_center <- if (input$normalize_by == "Mean") {
+                  mean(stat_values$selected_ratios, na.rm = TRUE)
+                } else {
+                  median(stat_values$selected_ratios, na.rm = TRUE)
+                }
+                stat_values$normalized_ratio <- stat_values$selected_ratios / normalization_center
+                stat_values$normalized_ratio_median <- median(stat_values$normalized_ratio, na.rm = TRUE)
+                stat_values$mad <- mad(stat_values$normalized_ratio, na.rm = TRUE)
+                stat_values$outliers_bool <- ifelse(
+                  ((abs(stat_values$normalized_ratio - stat_values$normalized_ratio_median) / stat_values$mad) >
+                     stat_values$mad_cutoff),
+                  "Outlier",
+                  "NS"
+                )
+                
+                reactive_values$df_data_to_show$Normalized_Ratio <- stat_values$normalized_ratio
+                reactive_values$df_data_to_show$Outlier <- stat_values$outliers_bool
+                stat_values$normalize_count <- stat_values$normalize_count + 1
                }
                )
   #Log Scale
   observeEvent(input$log_scale_button,
-               {
-               print(log(input$log_scale_x))
-               stat_values$normalized_ratio_log <- log(stat_values$normalized_ratio, base= input$log_scale_x)
-               stat_values$intensity_log <- log(stat_values$selected_intensity, base= input$log_scale_y)
-               reactive_values$df_data_to_show <- cbind(reactive_values$df_data_to_show,"log_Normalized_Ratio" = log(stat_values$normalized_ratio, base= input$log_scale_x), "log_Intensity" = log(stat_values$selected_intensity, base= input$log_scale_y))
+               {req(stat_values$normalized_ratio, stat_values$selected_intensity)
+                stat_values$normalized_ratio_log <- log(stat_values$normalized_ratio, base= input$log_scale_x)
+                stat_values$intensity_log <- log(stat_values$selected_intensity, base= input$log_scale_y)
+                reactive_values$df_data_to_show$log_Normalized_Ratio <- stat_values$normalized_ratio_log
+                reactive_values$df_data_to_show$log_Intensity <- stat_values$intensity_log
                }
                )
   
@@ -372,6 +377,20 @@ server <- function(input, output, session) {
                 choices = names(reactive_values$df_data_to_show),
                 multiple = FALSE)
                              })
+
+  output$plot_y1 <- renderUI({
+    selectInput(inputId = "plot_y_on_1",
+                label = "Y-axis:",
+                choices = names(reactive_values$df_data_to_show),
+                multiple = FALSE)
+  })
+
+  output$plot_x1 <- renderUI({
+    selectInput(inputId = "plot_x_on_1",
+                label = "X-axis:",
+                choices = names(reactive_values$df_data_to_show),
+                multiple = FALSE)
+  })
   
   
   #plot scatter zoomable#
@@ -437,10 +456,11 @@ server <- function(input, output, session) {
   #})
   
   output$xy <- renderPlotly({
+    req(input$plot_x_on_1, input$plot_y_on_1)
     # use the key aesthetic/argument to help uniquely identify selected observations
     key <- row.names(reactive_values$df_data_to_show)
 
-      plot_ly(reactive_values$df_data_to_show, x = ~input$plot_x, y = ~input$plot_y, key = ~key, type = "scatter") %>%
+      plot_ly(reactive_values$df_data_to_show, x = ~get(input$plot_x_on_1), y = ~get(input$plot_y_on_1), key = ~key, type = "scatter") %>%
         layout(dragmode = "select")
   })
   
