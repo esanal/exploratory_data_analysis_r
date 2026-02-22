@@ -1,8 +1,8 @@
-# Proteome Explorer (Shiny)
+# Exploratory Data Analysis for SILAC experiments (Shiny)
 
 This project is a Shiny app for quickly exploring quantitative proteomics tables.
 
-It is built for the common workflow of: upload one or more files, clean/filter columns, run basic ratio normalization, inspect outliers, make quick plots, and add GO annotations from mygene.
+It's workflow follows: upload one or more files, clean/filter columns, run basic ratio normalization, inspect outliers, make quick plots, and add GO annotations from mygene.
 
 ## What it does
 
