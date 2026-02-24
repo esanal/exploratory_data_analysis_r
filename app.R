@@ -1,6 +1,6 @@
 library(shiny)
 library(DT)
-library(tidyverse)
+library(dplyr)
 library(Cairo)
 library(ggplot2)
 library(gridExtra)
@@ -195,6 +195,147 @@ upsert_row_features <- function(base_df, updates_df) {
     base_df[[col_name]][target_idx] <- updates_df[[col_name]]
   }
   base_df
+}
+
+split_go_terms <- function(value) {
+  if (is.null(value) || length(value) == 0) {
+    return(character())
+  }
+  string_values <- as.character(value)
+  terms <- lapply(string_values, function(item) {
+    if (is.na(item) || stringr::str_trim(item) == "") {
+      return(character())
+    }
+    pieces <- stringr::str_split(item, pattern = ",\\s+", simplify = FALSE)[[1]]
+    pieces <- stringr::str_trim(pieces)
+    pieces[pieces != ""]
+  })
+  unlist(terms, use.names = FALSE)
+}
+
+count_go_terms <- function(values) {
+  terms <- split_go_terms(values)
+  if (length(terms) == 0) {
+    return(tibble::tibble(term = character(), count = integer()))
+  }
+  tibble::tibble(term = terms) %>%
+    dplyr::count(term, name = "count")
+}
+
+compute_go_enrichment <- function(focus_df, background_df, column_name) {
+  if (is.null(column_name) || column_name == "" ||
+      is.null(focus_df) || is.null(background_df) ||
+      !column_name %in% names(background_df)) {
+    return(tibble::tibble())
+  }
+  focus_counts <- count_go_terms(focus_df[[column_name]])
+  background_counts <- count_go_terms(background_df[[column_name]])
+  if (nrow(focus_counts) == 0 || nrow(background_counts) == 0) {
+    return(tibble::tibble())
+  }
+  focus_total <- sum(focus_counts$count)
+  background_total <- sum(background_counts$count)
+  if (focus_total == 0 || background_total == 0) {
+    return(tibble::tibble())
+  }
+
+  focus_counts <- dplyr::rename(focus_counts, focus_count = count)
+  background_counts <- dplyr::rename(background_counts, background_count = count)
+  merged <- dplyr::inner_join(focus_counts, background_counts, by = "term")
+  if (nrow(merged) == 0) {
+    return(tibble::tibble())
+  }
+  merged %>%
+    dplyr::mutate(
+      focus_prop = focus_count / focus_total,
+      background_prop = background_count / background_total,
+      enrichment = focus_prop / background_prop,
+      p_value = stats::phyper(
+        focus_count - 1,
+        background_count,
+        background_total - background_count,
+        focus_total,
+        lower.tail = FALSE
+      ),
+      p_adj = stats::p.adjust(p_value, method = "BH")
+    ) %>%
+    dplyr::arrange(p_value)
+}
+
+format_enrichment_table <- function(tbl) {
+  if (is.null(tbl) || nrow(tbl) == 0) {
+    return(tbl)
+  }
+  tbl %>%
+    dplyr::mutate(
+      enrichment = round(enrichment, 2),
+      p_value = signif(p_value, 3),
+      p_adj = signif(p_adj, 3)
+    )
+}
+
+prepare_enrichment_display <- function(tbl) {
+  if (is.null(tbl) || nrow(tbl) == 0) {
+    return(tibble::tibble(
+      term = character(),
+      focus_count = integer(),
+      background_count = integer(),
+      enrichment = numeric(),
+      p_value = numeric(),
+      p_adj = numeric()
+    ))
+  }
+  format_enrichment_table(tbl) %>%
+    dplyr::select(term, focus_count, background_count, enrichment, p_value, p_adj)
+}
+
+filter_enrichment_by_padj <- function(tbl, max_padj) {
+  if (is.null(tbl) || nrow(tbl) == 0 || is.null(max_padj) || is.na(max_padj)) {
+    return(tbl)
+  }
+  max_padj <- max(0, min(1, max_padj))
+  tbl %>% dplyr::filter(p_adj <= max_padj)
+}
+
+gsea_plot_data <- function(tbl, max_terms = 8) {
+  metadata <- prepare_plot_metadata(tbl)
+  if (is.null(metadata) || nrow(metadata) == 0) {
+    return(tibble::tibble())
+  }
+  metadata %>%
+    dplyr::filter(!is.na(p_adj)) %>%
+    dplyr::arrange(p_adj) %>%
+    head(max_terms)
+}
+
+prepare_plot_metadata <- function(tbl) {
+  if (is.null(tbl) || nrow(tbl) == 0) {
+    return(tibble::tibble())
+  }
+  tbl %>%
+    dplyr::mutate(
+      log_p = dplyr::if_else(!is.na(p_adj), -log10(pmax(p_adj, 1e-300)), NA_real_),
+      term = stringr::str_trunc(term, 50, ellipsis = "...")
+    )
+}
+
+prepare_plot_frame <- function(table_df, max_terms, selected_rows) {
+  metadata <- prepare_plot_metadata(table_df)
+  if (is.null(metadata) || nrow(metadata) == 0) {
+    return(metadata)
+  }
+  if (!is.null(selected_rows) && length(selected_rows) > 0) {
+    sel <- selection_limits(selected_rows, nrow(metadata))
+    if (length(sel) == 0) {
+      return(metadata[0, , drop = FALSE])
+    }
+    return(metadata[sel, , drop = FALSE])
+  }
+  gsea_plot_data(metadata, max_terms)
+}
+
+selection_limits <- function(selected_rows, max_rows) {
+  selected_rows[selected_rows >= 1 & selected_rows <= max_rows]
 }
 
 # User Interface
@@ -428,7 +569,7 @@ ui <- fluidPage(
                             sidebarPanel(
                                           uiOutput("select_gene_name"),
                                           textInput('name_separator', "Name Separator:", value = ';'),
-                                          textInput('new_gene_name_column', "New 'Gene Name' column:", value = 'GeneNameEdited'),
+                                          textInput('new_gene_name_column', "New 'Gene Name' column:", value = 'GeneName'),
                                           actionButton("separate", "Generate Gene Names"),
                                           actionButton("add_annotation", "Add annotation"),
                                           tags$div(
@@ -445,8 +586,44 @@ ui <- fluidPage(
                  DT::dataTableOutput("rendered_file_annotation")
                )
              )
-    ) 
+    ),
     #End of Tab Panel 5: Annotation ----
+    tabPanel("Gene Set Enrichment", fluid = TRUE,
+             sidebarLayout(
+               sidebarPanel(
+                 uiOutput("select_gsea_go_column"),
+                 numericInput("gsea_up_override", "Up-regulated cutoff (can edit)", value = NA, step = 0.01),
+                 numericInput("gsea_down_override", "Down-regulated cutoff (can edit)", value = NA, step = 0.01),
+                 numericInput("gsea_pvalue_threshold", "Max adjusted p-value", value = 0.05, min = 0, max = 1, step = 0.01),
+                 numericInput("gsea_plot_terms", "Terms to show in plots", value = 8, min = 3, max = 20, step = 1),
+                 actionButton("run_gsea", "Refresh enrichment"),
+                 helpText("Normalized ratio is calculated in the Statistics tab; GO columns are populated via annotation."),
+                 helpText("Charts default to the top N terms shown in the tables, but clicking a row will redraw the plot with only those entries."),
+                 textOutput("gsea_threshold_display")
+              ),
+               mainPanel(
+                 fluidRow(
+                   column(6,
+                          h4("Up-regulated enrichment chart"),
+                          downloadButton("gsea_up_plot_pdf", "Save up chart as PDF", class = "btn-sm"),
+                          plotOutput("gsea_up_plot", height = "360px")
+                   ),
+                   column(6,
+                          h4("Down-regulated enrichment chart"),
+                          downloadButton("gsea_down_plot_pdf", "Save down chart as PDF", class = "btn-sm"),
+                          plotOutput("gsea_down_plot", height = "360px")
+                   )
+                 ),
+                 h4("Enrichment summary"),
+                 textOutput("gsea_summary"),
+                 h4("Up-regulated gene sets"),
+                 DT::dataTableOutput("gsea_up_table"),
+                 h4("Down-regulated gene sets"),
+                 DT::dataTableOutput("gsea_down_table")
+               )
+            )
+    )
+    #End of Tab Panel 6: Gene Set Enrichment ----
   )
 )
 # End of User Interface
@@ -464,8 +641,19 @@ server <- function(input, output, session) {
     measurement_long_view = NULL,
     GO_results = NULL
   )
+  gene_name_column <- reactive({
+    col <- stringr::str_trim(input$new_gene_name_column)
+    if (is.null(col) || col == "") {
+      "GeneName"
+    } else {
+      col
+    }
+  })
   #Define statistics values
-  stat_values <- reactiveValues(normalize_count = 0)
+  stat_values <- reactiveValues(
+    normalize_count = 0,
+    mad_cutoff = qnorm(0.95)
+  )
   annotation_status <- reactiveVal("Idle")
   annotation_detail <- reactiveVal("")
   annotation_progress <- reactiveVal(0)
@@ -489,6 +677,53 @@ server <- function(input, output, session) {
     invisible(NULL)
   }
 
+  load_example_dataset <- function() {
+    example_path <- file.path(getwd(), "Book1.txt")
+    if (!file.exists(example_path)) {
+      return(invisible(NULL))
+    }
+    example_raw <- tryCatch(
+      {
+        read_uploaded_table(
+          example_path,
+          sep = "\t",
+          has_header = TRUE
+        )
+      },
+      error = function(e) {
+        showNotification(paste("Could not load example dataset:", e$message), type = "error")
+        NULL
+      }
+    )
+    if (is.null(example_raw) || nrow(example_raw) == 0) {
+      return(invisible(NULL))
+    }
+    example_typed <- tryCatch(
+      {
+        suppressWarnings(
+          readr::type_convert(
+            example_raw,
+            na = c("", "NA", "NaN", "NULL"),
+            guess_integer = TRUE
+          )
+        )
+      },
+      error = function(e) {
+        showNotification(paste("Example dataset parsing failed:", e$message), type = "error")
+        NULL
+      }
+    )
+    if (is.null(example_typed) || nrow(example_typed) == 0) {
+      return(invisible(NULL))
+    }
+    example_typed <- example_typed %>%
+      dplyr::mutate(row_id = dplyr::row_number()) %>%
+      dplyr::relocate(row_id, .before = 1)
+    initialize_data_store(example_typed)
+    showNotification("Loaded Book1.txt as the example dataset.", type = "message")
+    invisible(TRUE)
+  }
+
   update_derived_rows <- function(updates_df) {
     if (is.null(data_store$row_features)) {
       return(invisible(NULL))
@@ -498,6 +733,8 @@ server <- function(input, output, session) {
     data_store$measurement_long_view <- build_measurement_long(current_view)
     invisible(NULL)
   }
+
+  load_example_dataset()
 
   current_data <- reactive({
     req(data_store$view)
@@ -604,16 +841,17 @@ server <- function(input, output, session) {
     )
   }
 
-  build_scrollable_table <- function(df, page_length = 25, scroll_height = "60vh") {
-    DT::datatable(
-      df,
-      filter = "top",
-      rownames = FALSE,
-      extensions = c("Scroller"),
-      class = "display compact nowrap stripe hover",
-      options = scrollable_dt_options(page_length = page_length, scroll_height = scroll_height)
-    )
-  }
+build_scrollable_table <- function(df, page_length = 25, scroll_height = "60vh", table_selection = "none") {
+  DT::datatable(
+    df,
+    filter = "top",
+    rownames = FALSE,
+    extensions = c("Scroller"),
+    class = "display compact nowrap stripe hover",
+    selection = table_selection,
+    options = scrollable_dt_options(page_length = page_length, scroll_height = scroll_height)
+  )
+}
 
   # Print data table  
   output$rendered_file <- DT::renderDataTable({
@@ -738,6 +976,288 @@ server <- function(input, output, session) {
     }
     intensity_cols
   })
+
+  gsea_go_columns <- reactive({
+    req(current_data())
+    stringr::str_subset(names(current_data()), "^GO_")
+  })
+
+  output$select_gsea_go_column <- renderUI({
+    choices <- gsea_go_columns()
+    if (length(choices) == 0) {
+      tags$div("No GO columns detected. Run annotation to add GO terms.")
+    } else {
+      selectInput(
+        inputId = "selected_gsea_go_column",
+        label = "GO column for enrichment",
+        choices = choices,
+        selected = choices[[1]],
+        multiple = FALSE
+      )
+    }
+  })
+
+  gsea_thresholds <- reactive({
+    req(stat_values$normalize_count > 0)
+    req(stat_values$mad_cutoff, stat_values$normalized_ratio_median, stat_values$mad)
+    offset <- stat_values$mad_cutoff * stat_values$mad
+    list(
+      up = stat_values$normalized_ratio_median + offset,
+      down = stat_values$normalized_ratio_median - offset,
+      offset = offset
+    )
+  })
+
+  derived_cutoff_tracker <- reactiveValues(up = NULL, down = NULL)
+
+  is_close <- function(a, b, tol = 1e-7) {
+    if (is.null(a) || is.null(b)) {
+      return(FALSE)
+    }
+    if (length(a) == 0 || length(b) == 0) {
+      return(FALSE)
+    }
+    if (is.na(a) || is.na(b)) {
+      return(FALSE)
+    }
+    abs(a - b) < tol
+  }
+
+  is_na_value <- function(x) {
+    is.null(x) || (length(x) == 1 && is.na(x))
+  }
+
+  observeEvent(gsea_thresholds(), {
+    derived <- gsea_thresholds()
+    should_update_up <- is.null(derived_cutoff_tracker$up) ||
+      is_close(input$gsea_up_override, derived_cutoff_tracker$up) ||
+      is_na_value(input$gsea_up_override)
+    should_update_down <- is.null(derived_cutoff_tracker$down) ||
+      is_close(input$gsea_down_override, derived_cutoff_tracker$down) ||
+      is_na_value(input$gsea_down_override)
+    if (should_update_up) {
+      updateNumericInput(session, "gsea_up_override", value = derived$up)
+    }
+    if (should_update_down) {
+      updateNumericInput(session, "gsea_down_override", value = derived$down)
+    }
+    derived_cutoff_tracker$up <- derived$up
+    derived_cutoff_tracker$down <- derived$down
+  })
+
+  gsea_effective_cutoffs <- reactive({
+    derived <- gsea_thresholds()
+    up_manual <- input$gsea_up_override
+    down_manual <- input$gsea_down_override
+    up_val <- if (!is_na_value(up_manual)) up_manual else derived$up
+    down_val <- if (!is_na_value(down_manual)) down_manual else derived$down
+    list(
+      up = up_val,
+      down = down_val,
+      derived = derived
+    )
+  })
+
+  gsea_results <- reactive({
+    req(current_data())
+    req(length(gsea_go_columns()) > 0)
+    req(stat_values$normalize_count > 0)
+    dataset <- current_data()
+    if (!"Normalized_Ratio" %in% names(dataset) || nrow(dataset) == 0) {
+      return(NULL)
+    }
+    go_column <- input$selected_gsea_go_column
+    if (is.null(go_column) || go_column == "") {
+      return(NULL)
+    }
+    effective_cutoffs <- gsea_effective_cutoffs()
+    input$run_gsea
+    normalized <- dataset[["Normalized_Ratio"]]
+    focus_df <- dataset[!is.na(normalized), , drop = FALSE]
+    focus_up <- focus_df[focus_df[["Normalized_Ratio"]] >= effective_cutoffs$up, , drop = FALSE]
+    focus_down <- focus_df[focus_df[["Normalized_Ratio"]] <= effective_cutoffs$down, , drop = FALSE]
+    list(
+      up = compute_go_enrichment(focus_up, focus_df, go_column),
+      down = compute_go_enrichment(focus_down, focus_df, go_column),
+      stats = list(
+        n_up = nrow(focus_up),
+        n_down = nrow(focus_down),
+        background_n = nrow(focus_df),
+        thresholds = effective_cutoffs
+      )
+    )
+  })
+
+  gsea_up_table_data <- reactive({
+    res <- gsea_results()
+    req(res)
+    filtered <- filter_enrichment_by_padj(res$up, input$gsea_pvalue_threshold)
+    prepare_enrichment_display(filtered)
+  })
+
+  gsea_down_table_data <- reactive({
+    res <- gsea_results()
+    req(res)
+    filtered <- filter_enrichment_by_padj(res$down, input$gsea_pvalue_threshold)
+    prepare_enrichment_display(filtered)
+  })
+
+  output$gsea_threshold_display <- renderText({
+    if (stat_values$normalize_count == 0 || is.null(stat_values$mad)) {
+      return("Run normalization first so the MAD-derived cutoff can be applied to enrichment.")
+    }
+    effective <- gsea_effective_cutoffs()
+    derived <- effective$derived
+    base <- paste0(
+      "Enrichment groups use MAD-derived cutoffs: up ≥ ",
+      signif(derived$up, 3),
+      " and down ≤ ",
+      signif(derived$down, 3),
+      " (offset ", signif(derived$offset, 3), ")."
+    )
+    if (!is_close(effective$up, derived$up) || !is_close(effective$down, derived$down)) {
+      paste0(
+        base,
+        " Manual cutoffs applied: up ≥ ",
+        signif(effective$up, 3),
+        ", down ≤ ",
+        signif(effective$down, 3),
+        "."
+      )
+    } else {
+      base
+    }
+  })
+
+  output$gsea_summary <- renderText({
+    res <- gsea_results()
+    if (is.null(res)) {
+      return("Normalized ratio and GO annotations are required before running enrichment.")
+    }
+    stats <- res$stats
+    effective <- stats$thresholds
+    max_padj <- input$gsea_pvalue_threshold
+    base <- paste0(
+      "Background genes: ", stats$background_n,
+      "; up-regulated genes (≥ ", signif(effective$up, 3), "): ", stats$n_up,
+      "; down-regulated genes (≤ ", signif(effective$down, 3), "): ", stats$n_down
+    )
+    if (!is.na(max_padj)) {
+      paste0(base, "; p_adj ≤ ", signif(max_padj, 3))
+    } else {
+      base
+    }
+  })
+
+  output$gsea_up_table <- DT::renderDataTable({
+    df <- gsea_up_table_data()
+    validate(
+      need(nrow(df) > 0, "No up-regulated terms pass the current filters.")
+    )
+    build_scrollable_table(
+      df,
+      page_length = 10,
+      scroll_height = "35vh",
+      table_selection = "multiple"
+    )
+  })
+
+  output$gsea_down_table <- DT::renderDataTable({
+    df <- gsea_down_table_data()
+    validate(
+      need(nrow(df) > 0, "No down-regulated terms pass the current filters.")
+    )
+    build_scrollable_table(
+      df,
+      page_length = 10,
+      scroll_height = "35vh",
+      table_selection = "multiple"
+    )
+  })
+
+gsea_plot_frames <- reactive({
+  up_tbl <- gsea_up_table_data()
+  down_tbl <- gsea_down_table_data()
+    plot_term_count <- input$gsea_plot_terms
+    plot_term_count <- ifelse(is.null(plot_term_count) || is.na(plot_term_count), 8, plot_term_count)
+  list(
+    up = prepare_plot_frame(up_tbl, plot_term_count, input$gsea_up_table_rows_selected),
+    down = prepare_plot_frame(down_tbl, plot_term_count, input$gsea_down_table_rows_selected)
+  )
+})
+
+guess_go_label <- function(col_name) {
+  if (is.null(col_name) || col_name == "") {
+    return("GO")
+  }
+  label <- dplyr::case_when(
+    stringr::str_detect(col_name, "MF") ~ "Molecular Function",
+    stringr::str_detect(col_name, "BP") ~ "Biological Process",
+    stringr::str_detect(col_name, "CC") ~ "Cellular Component",
+    TRUE ~ "GO"
+  )
+  label
+}
+
+render_gsea_plot <- function(plot_df, title) {
+    if (is.null(plot_df) || nrow(plot_df) == 0) {
+      plot.new()
+      text(0.5, 0.5, "No enriched terms pass the p-value filter.", cex = 1.1)
+      return(invisible(NULL))
+    }
+    ggplot(plot_df, aes(x = reorder(term, log_p), y = log_p, fill = enrichment)) +
+      geom_col(width = 0.7, color = "#2c3e50", size = 0.4) +
+      coord_flip() +
+      scale_fill_gradient(low = "#aed6f1", high = "#2471a3", guide = guide_colourbar(title = "Fold enrichment")) +
+      labs(x = NULL, y = expression(-log[10](p[adj])), title = title) +
+      theme_classic(base_size = 12) +
+      theme(
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.y = element_text(size = 10),
+        axis.text.x = element_text(size = 10),
+        axis.title.x = element_text(face = "bold"),
+        axis.line = element_line(color = "#2c3e50")
+      )
+  }
+
+  output$gsea_up_plot <- renderPlot({
+    plot_df <- gsea_plot_frames()$up
+    go_label <- guess_go_label(input$selected_gsea_go_column)
+    render_gsea_plot(plot_df, paste("Top up-regulated", go_label, "terms"))
+  })
+
+  output$gsea_up_plot_pdf <- downloadHandler(
+    filename = function() {
+      paste0("gsea_up_plot_", format(Sys.Date(), "%Y%m%d"), ".pdf")
+    },
+    content = function(file) {
+      plot_df <- gsea_plot_frames()$up
+      Cairo::Cairo(type = "pdf", file = file, width = 10, height = 6, units = "in")
+      print(render_gsea_plot(plot_df, "Top up-regulated GO terms"))
+      dev.off()
+    }
+  )
+
+  output$gsea_down_plot <- renderPlot({
+    plot_df <- gsea_plot_frames()$down
+    go_label <- guess_go_label(input$selected_gsea_go_column)
+    render_gsea_plot(plot_df, paste("Top down-regulated", go_label, "terms"))
+  })
+
+  output$gsea_down_plot_pdf <- downloadHandler(
+    filename = function() {
+      paste0("gsea_down_plot_", format(Sys.Date(), "%Y%m%d"), ".pdf")
+    },
+    content = function(file) {
+      plot_df <- gsea_plot_frames()$down
+      Cairo::Cairo(type = "pdf", file = file, width = 10, height = 6, units = "in")
+      print(render_gsea_plot(plot_df, "Top down-regulated GO terms"))
+      dev.off()
+    }
+  )
   
   #Define ratio column
   output$select_ratio_column <- renderUI({
@@ -760,14 +1280,30 @@ server <- function(input, output, session) {
   ####Calculate normalized values####
   #Generate summary for ratio column, normalize and MAD
   output$summary_text_before_norm <- renderText({
-                                                  req(input$selected_ratio_column)
-                                                  summary(data.frame(stat_values$selected_ratios))
-                                                 })
+                                                req(input$selected_ratio_column)
+                                                req(!is.null(stat_values$m))
+                                                paste0(
+                                                  "Initial median for ", input$selected_ratio_column, ": ",
+                                                  signif(stat_values$m, 3)
+                                                )
+                                               })
   
   #Generate summary for after normalization
   output$summary_text_after_norm <- renderText({
-                                                req(input$normalize_button)
-                                                summary(data.frame(stat_values$normalized_ratio))
+                                                req(stat_values$normalize_count > 0)
+                                                req(!is.null(stat_values$normalized_ratio_median))
+                                                req(!is.null(stat_values$mad))
+                                                req(!is.null(stat_values$mad_cutoff))
+                                                offset <- stat_values$mad_cutoff * stat_values$mad
+                                                paste0(
+                                                  "Median after normalization: ",
+                                                  signif(stat_values$normalized_ratio_median, 3),
+                                                  "; MAD: ", signif(stat_values$mad, 3),
+                                                  "; Outlier cutoffs: ≥ ",
+                                                  signif(stat_values$normalized_ratio_median + offset, 3),
+                                                  " / ≤ ",
+                                                  signif(stat_values$normalized_ratio_median - offset, 3)
+                                                )
                                                 })
   
 
@@ -1065,11 +1601,10 @@ server <- function(input, output, session) {
                          detail = paste0("Generating gene names (", k, "/", gnl_l, ")...")
                        )
                      }
-                     updates <- tibble::tibble(
-                       row_id = current_data()$row_id,
-                       GeneNames = gnl
-                     )
-                     update_derived_rows(updates)
+                     col_name <- gene_name_column()
+                     updates <- tibble::tibble(row_id = current_data()$row_id)
+                     updates[[col_name]] <- gnl
+                    update_derived_rows(updates)
                      update_annotation_progress(
                        progress = 100,
                        status = paste0("Gene names generated successfully at ", format(Sys.time(), "%H:%M:%S"), "."),
@@ -1098,8 +1633,9 @@ server <- function(input, output, session) {
                  tryCatch(
                    {
                      req(current_data())
-                     req("GeneNames" %in% names(current_data()))
-                     gnl <- current_data()$GeneNames
+                     target_col <- gene_name_column()
+                     req(target_col %in% names(current_data()))
+                     gnl <- current_data()[[target_col]]
                      update_annotation_progress(
                        progress = 10,
                        detail = "Fetching GO annotations from mygene..."
