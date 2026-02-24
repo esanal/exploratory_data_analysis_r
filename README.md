@@ -69,3 +69,14 @@ Or in RStudio, open `app.R` and click **Run App**.
 - Multi-file upload expects matching column names and order.
 - GO annotation requires internet access to query mygene.
 - For large files, annotation can take some time; progress is shown in the app.
+
+## Screenshots
+
+1. Data upload, filtering, and normalization summary along with the GSEA workflow.
+![Upload and enrichment overview](ss1.png)
+
+2. Gene Set Enrichment tab showing the filtered tables and publication-ready plots.
+![Enrichment tables and charts](ss2.png)
+
+3. Annotation tab with generated gene names and progress feedback.
+![Annotation workflow](ss3.png)
