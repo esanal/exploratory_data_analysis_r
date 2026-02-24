@@ -75,7 +75,7 @@ Or in RStudio, open `app.R` and click **Run App**.
 1. Data upload, filtering, and normalization summary along with the GSEA workflow.
 ![Upload and enrichment overview](ss1.png)
 
-2. Gene Set Enrichment tab showing the filtered tables and publication-ready plots.
+2. Gene Set Enrichment tab showing the filtered tables and plots.
 ![Enrichment tables and charts](ss2.png)
 
 3. Annotation tab with generated gene names and progress feedback.
