@@ -1,4 +1,14 @@
-.Rproj.user
+*.Rhistory
+.Rproj.user/
+*.Rdata
+*.RData
+*.RDS
 .Rhistory
-.RData
-.Ruserdata
+_Rproj.user/
+*.log
+*.tmp
+*.cache
+*.DS_Store
+*.swp
+.idea/
+/.RData
