@@ -8,6 +8,7 @@ library(gridExtra)
 library(shinythemes)
 library(plotly)
 library(mygene)
+library(visNetwork)
 
 options(shiny.maxRequestSize=200*1024^2) 
 
@@ -206,7 +207,7 @@ split_go_terms <- function(value) {
     if (is.na(item) || stringr::str_trim(item) == "") {
       return(character())
     }
-    pieces <- stringr::str_split(item, pattern = ",\\s+", simplify = FALSE)[[1]]
+    pieces <- stringr::str_split(item, pattern = ",\\s*", simplify = FALSE)[[1]]
     pieces <- stringr::str_trim(pieces)
     pieces[pieces != ""]
   })
@@ -1084,7 +1085,8 @@ build_scrollable_table <- function(df, page_length = 25, scroll_height = "60vh",
         n_down = nrow(focus_down),
         background_n = nrow(focus_df),
         thresholds = effective_cutoffs
-      )
+      ),
+      focus = list(all = focus_df, up = focus_up, down = focus_down)
     )
   })
 
@@ -1175,7 +1177,7 @@ build_scrollable_table <- function(df, page_length = 25, scroll_height = "60vh",
     )
   })
 
-gsea_plot_frames <- reactive({
+  gsea_plot_frames <- reactive({
   up_tbl <- gsea_up_table_data()
   down_tbl <- gsea_down_table_data()
     plot_term_count <- input$gsea_plot_terms
