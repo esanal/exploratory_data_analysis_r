@@ -4,7 +4,7 @@ This project is a Shiny app for quickly exploring quantitative proteomics tables
 
 It's workflow follows: upload one or more files, clean/filter columns, run basic ratio normalization, inspect outliers, make quick plots, and add GO annotations from mygene.
 
-Start exploring at: https://019cf767-692a-a860-f604-366877b2afca.share.connect.posit.cloud/
+Start exploring at: https://esanal-exploratory-data-analysis-r.share.connect.posit.cloud/
 or run it locally (see below)
     
 ## What it does
