@@ -78,8 +78,11 @@ Or in RStudio, open `app.R` and click **Run App**.
 1. Data upload, filtering, and normalization summary along with the GSEA workflow.
 ![Upload and enrichment overview](ss1.png)
 
-2. Gene Set Enrichment tab showing the filtered tables and plots.
-![Enrichment tables and charts](ss2.png)
+2. Scatter-Plot tab showing differentially expressed protein groups found in statistics tab
+![Explore DE proteins](ss2.png)
 
 3. Annotation tab with generated gene names and progress feedback.
 ![Annotation workflow](ss3.png)
+
+4. Gene Set Enrichment tab showing the filtered tables and plots.
+![GSE workflow](ss4.png)
