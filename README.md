@@ -1,11 +1,11 @@
-# Exploratory Data Analysis for SILAC experiments (Shiny)
+# Exploratory Data Analysis for quantitative proteomics (SILAC etc.) experiments
 
-This project is a Shiny app for quickly exploring quantitative proteomics tables.
+This project is a Shiny app for quickly exploring quantitative proteomics tables where 2 conditions' ratios evaluated against each other.
 
-It's workflow follows: upload one or more files, clean/filter columns, run basic ratio normalization, inspect outliers, make quick plots, and add GO annotations from mygene.
+It's workflow follows: upload one or more files, clean/filter columns, run basic ratio normalization on the protein ratios, inspect outliers, make quick plots, and add GO annotations from mygene and plot overrepresented gene functions. 
 
 Start exploring at: https://esanal-exploratory-data-analysis-r.share.connect.posit.cloud/
-or run it locally (see below)
+or run it locally (see below).
     
 ## What it does
 
