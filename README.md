@@ -63,15 +63,15 @@ Or in RStudio, open `app.R` and click **Run App**.
 2. Choose separator/header options if needed.
 3. Keep only columns you care about and filter unwanted rows.
 4. In **Statistics**, choose ratio/intensity columns, normalize, and flag outliers.
-5. Use **Scatter-Plot** / **Scatter-Plot2** / **Histogram** for quick QC.
-6. In **Annotation**, generate gene names, then add GO annotations.
+5. Use **Scatter-Plot** / **Scatter-Plot2** / **Histogram** for quick plotting of the columns of choice.
+6. In **Annotation**, generate gene names based on the organisms selected, then add GO annotations.
 7. Download the processed table from the **Data** tab.
 
 ## Notes
 
 - Multi-file upload expects matching column names and order.
 - GO annotation requires internet access to query mygene.
-- For large files, annotation can take some time; progress is shown in the app.
+- For large files, annotation can take some time approximate progress is shown in the app.
 
 ## Screenshots
 
